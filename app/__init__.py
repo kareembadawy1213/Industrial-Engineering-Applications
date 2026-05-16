@@ -21,6 +21,9 @@ def create_app(config_name: str = 'default') -> Flask:
     db.init_app(app)
     migrate.init_app(app, db)
 
+    # Load models before creating tables so SQLAlchemy metadata includes them
+    from .models import Project, Analysis
+
     # Ensure the database tables exist when the app starts under gunicorn
     with app.app_context():
         db.create_all()
