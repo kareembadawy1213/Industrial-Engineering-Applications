@@ -21,6 +21,10 @@ def create_app(config_name: str = 'default') -> Flask:
     db.init_app(app)
     migrate.init_app(app, db)
 
+    # Ensure the database tables exist when the app starts under gunicorn
+    with app.app_context():
+        db.create_all()
+
     # ── Register blueprints ─────────────────────────────────────────────────
     from .routes.main import main_bp
     from .routes.pert import pert_bp
