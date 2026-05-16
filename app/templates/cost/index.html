@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}Cost Analysis{% endblock %}
+{% block page_title %}<i class="fas fa-dollar-sign me-2" style="color:#16a34a"></i>Cost Analysis{% endblock %}
+
+{% block content %}
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="ie-card">
+      <div class="card-header-ie">
+        <div class="card-icon" style="background:rgba(22,163,74,.15);color:#4ade80"><i class="fas fa-calculator"></i></div>
+        <div><div class="fw-600 text-white">Cost Alternatives</div>
+          <div style="font-size:.75rem;color:#475569">Add alternatives to compare</div>
+        </div>
+      </div>
+
+      <div id="alts-container"></div>
+      <button type="button" class="btn btn-sm mb-3"
+              style="background:rgba(22,163,74,.12);color:#4ade80;border:1px solid rgba(22,163,74,.3);border-radius:7px"
+              onclick="addAlt()">
+        <i class="fas fa-plus me-1"></i>Add Alternative
+      </button>
+
+      <div class="row g-2 mb-3">
+        <div class="col-4">
+          <label class="form-label">Min Qty</label>
+          <input type="number" id="qMin" class="form-control" value="0" min="0">
+        </div>
+        <div class="col-4">
+          <label class="form-label">Max Qty</label>
+          <input type="number" id="qMax" class="form-control" value="10000" min="1">
+        </div>
+        <div class="col-4">
+          <label class="form-label">Step</label>
+          <input type="number" id="qStep" class="form-control" value="500" min="1">
+        </div>
+      </div>
+
+      {% if projects %}
+      <div class="mb-3">
+        <label class="form-label">Save to Project</label>
+        <select id="projectSel" class="form-select">
+          <option value="">— Don't save —</option>
+          {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <div class="d-flex gap-2">
+        <button class="btn-primary-ie flex-fill" onclick="runAnalysis()">
+          <i class="fas fa-calculator me-2"></i>Analyze Costs
+        </button>
+        <button class="btn btn-sm" style="background:rgba(22,163,74,.12);color:#4ade80;border:1px solid rgba(22,163,74,.3);border-radius:8px"
+                onclick="loadExample()">Example</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div id="results-area" style="display:none">
+      <!-- Summary table -->
+      <div class="ie-card mb-3">
+        <div class="fw-600 text-white mb-3"><i class="fas fa-table me-2" style="color:#16a34a"></i>Results Summary</div>
+        <div style="overflow-x:auto">
+          <table class="ie-table" id="results-table">
+            <thead><tr><th>Alternative</th><th>Fixed Cost</th><th>Variable Cost</th><th>Production Qty</th><th>Total Cost</th><th>Revenue</th><th>Profit</th><th>Margin %</th></tr></thead>
+            <tbody id="results-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Charts -->
+      <div class="chart-box mb-3">
+        <div class="fw-600 text-white mb-2">Total Cost vs Quantity</div>
+        <canvas id="costChart" height="140"></canvas>
+      </div>
+      <div class="chart-box mb-3">
+        <div class="fw-600 text-white mb-2">Profit vs Quantity</div>
+        <canvas id="profitChart" height="140"></canvas>
+      </div>
+
+      <!-- Crossovers -->
+      <div id="crossover-section" class="ie-card mb-3" style="display:none">
+        <div class="fw-600 text-white mb-2"><i class="fas fa-exchange-alt me-2" style="color:#d97706"></i>Crossover Points</div>
+        <div id="crossover-body"></div>
+      </div>
+
+      <div class="ie-card">
+        <div class="fw-600 text-white mb-2"><i class="fas fa-robot me-2" style="color:#fbbf24"></i>AI Recommendations</div>
+        <div id="recs-container"></div>
+      </div>
+    </div>
+    <div id="empty-state" class="ie-card text-center py-5">
+      <i class="fas fa-coins fa-3x mb-3" style="color:#1e3a5f"></i>
+      <div class="fw-600 text-white">Add alternatives and run analysis</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function altTemplate() {
+  return `
+    <div class="row g-2">
+      <div class="col-12"><label class="form-label">Name</label><input class="form-control alt-name" placeholder="Alternative A"></div>
+      <div class="col-6"><label class="form-label">Fixed Cost ($)</label><input type="number" class="form-control alt-fc" min="0" step="any"></div>
+      <div class="col-6"><label class="form-label">Variable Cost/Unit ($)</label><input type="number" class="form-control alt-vc" min="0" step="any"></div>
+      <div class="col-6"><label class="form-label">Selling Price/Unit ($)</label><input type="number" class="form-control alt-sp" min="0" step="any"></div>
+      <div class="col-6"><label class="form-label">Production Qty</label><input type="number" class="form-control alt-qty" min="0" step="any"></div>
+    </div>
+    <button type="button" class="btn-remove-row" onclick="removeRow(this)"><i class="fas fa-times"></i></button>`;
+}
+function addAlt() { addRow('alts-container', altTemplate); }
+
+function collectAlts() {
+  return Array.from(document.querySelectorAll('#alts-container .dynamic-row')).map(row => ({
+    name:                   row.querySelector('.alt-name')?.value.trim(),
+    fixed_cost:             parseFloat(row.querySelector('.alt-fc')?.value || 0),
+    variable_cost_per_unit: parseFloat(row.querySelector('.alt-vc')?.value || 0),
+    selling_price:          parseFloat(row.querySelector('.alt-sp')?.value || 0),
+    production_qty:         parseFloat(row.querySelector('.alt-qty')?.value || parseFloat(document.getElementById('qMax')?.value || 10000)),
+  })).filter(a => a.name);
+}
+
+async function runAnalysis() {
+  const alts = collectAlts();
+  if (!alts.length) { alert('Add at least one alternative.'); return; }
+  showSpinner();
+  try {
+    const data = await postJSON('/cost/analyze', {
+      alternatives:  alts,
+      quantity_range: [+document.getElementById('qMin').value, +document.getElementById('qMax').value, +document.getElementById('qStep').value],
+      project_id:    document.getElementById('projectSel')?.value || null
+    });
+    renderResults(data);
+  } catch(e) { alert('Error: ' + e.message); } finally { hideSpinner(); }
+}
+
+function renderResults(d) {
+  document.getElementById('empty-state').style.display  = 'none';
+  document.getElementById('results-area').style.display = 'block';
+
+  const best = d.best_alternative?.name;
+  document.getElementById('results-body').innerHTML = d.results.map(r => `
+    <tr>
+      <td class="fw-600" style="color:${r.name===best?'#4ade80':'#e2e8f0'}">${r.name} ${r.name===best?'<span class="badge-ok">Best</span>':''}</td>
+      <td>$${fmt(r.fixed_cost, 0)}</td><td>$${fmt(r.variable_cost)}</td>
+      <td>${fmt(r.production_qty, 0)}</td><td>$${fmt(r.total_cost, 0)}</td>
+      <td>$${fmt(r.revenue, 0)}</td>
+      <td style="color:${r.profit>=0?'#4ade80':'#f87171'}">$${fmt(r.profit, 0)}</td>
+      <td style="color:${r.profit_margin>=20?'#4ade80':r.profit_margin>=10?'#fbbf24':'#f87171'}">${r.profit_margin}%</td>
+    </tr>`).join('');
+
+  const colors = ['#3b82f6','#ef4444','#16a34a','#d97706','#8b5cf6'];
+  const qs     = d.chart_data.quantities;
+
+  const cOld = Chart.getChart('costChart'); if (cOld) cOld.destroy();
+  new Chart(document.getElementById('costChart'), {
+    type: 'line',
+    data: { labels: qs, datasets: d.results.map((r,i) => ({
+      label: r.name, data: d.chart_data.total_costs[r.name],
+      borderColor: colors[i%colors.length], backgroundColor: 'transparent', borderWidth: 2, tension:.3, pointRadius:0
+    }))},
+    options: CHART_DEFAULTS
+  });
+
+  const pOld = Chart.getChart('profitChart'); if (pOld) pOld.destroy();
+  new Chart(document.getElementById('profitChart'), {
+    type: 'line',
+    data: { labels: qs, datasets: d.results.map((r,i) => ({
+      label: r.name, data: d.chart_data.profits[r.name],
+      borderColor: colors[i%colors.length], backgroundColor: 'transparent', borderWidth: 2, tension:.3, pointRadius:0
+    }))},
+    options: CHART_DEFAULTS
+  });
+
+  if (d.crossovers?.length) {
+    document.getElementById('crossover-section').style.display = 'block';
+    document.getElementById('crossover-body').innerHTML = d.crossovers.map(c => `
+      <div style="background:rgba(217,119,6,.1);border:1px solid rgba(217,119,6,.2);border-radius:8px;padding:.6rem .9rem;margin-bottom:.5rem;font-size:.83rem">
+        <i class="fas fa-exchange-alt me-2" style="color:#fbbf24"></i>
+        <strong style="color:#fff">${c.between}</strong>: costs equal at
+        <strong style="color:#fbbf24">${c.quantity.toLocaleString()} units</strong>
+        (cost = $${c.cost_at_crossover?.toLocaleString() || '—'})
+      </div>`).join('');
+  }
+
+  renderRecs(d.recs, 'recs-container');
+}
+
+function loadExample() {
+  document.getElementById('alts-container').innerHTML = '';
+  const ex = [
+    {name:'Option A – Low FC', fc:50000, vc:25, sp:45, qty:5000},
+    {name:'Option B – Med FC',  fc:120000, vc:18, sp:45, qty:5000},
+    {name:'Option C – High FC', fc:200000, vc:12, sp:45, qty:5000},
+  ];
+  ex.forEach(() => addAlt());
+  const rows = document.querySelectorAll('#alts-container .dynamic-row');
+  ex.forEach((e,i) => {
+    rows[i].querySelector('.alt-name').value = e.name;
+    rows[i].querySelector('.alt-fc').value   = e.fc;
+    rows[i].querySelector('.alt-vc').value   = e.vc;
+    rows[i].querySelector('.alt-sp').value   = e.sp;
+    rows[i].querySelector('.alt-qty').value  = e.qty;
+  });
+}
+
+addAlt(); addAlt();
+</script>
+{% endblock %}

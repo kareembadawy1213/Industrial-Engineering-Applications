@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}<i class="fas fa-tachometer-alt me-2" style="color:#3b82f6"></i>Dashboard{% endblock %}
+
+{% block content %}
+<!-- Stats row -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon" style="background:rgba(37,99,235,.15);color:#3b82f6"><i class="fas fa-folder"></i></div>
+      <div>
+        <div class="stat-value">{{ total_projects }}</div>
+        <div class="stat-label">Projects</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon" style="background:rgba(124,58,237,.15);color:#a78bfa"><i class="fas fa-chart-bar"></i></div>
+      <div>
+        <div class="stat-value">{{ total_analyses }}</div>
+        <div class="stat-label">Analyses Run</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon" style="background:rgba(22,163,74,.15);color:#4ade80"><i class="fas fa-check-circle"></i></div>
+      <div>
+        <div class="stat-value">7</div>
+        <div class="stat-label">IE Modules</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon" style="background:rgba(217,119,6,.15);color:#fbbf24"><i class="fas fa-robot"></i></div>
+      <div>
+        <div class="stat-value">AI</div>
+        <div class="stat-label">Smart Advisor</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Module cards -->
+<h6 class="text-muted-ie mb-3 fw-600 text-uppercase" style="font-size:.75rem;letter-spacing:1px">IE Modules</h6>
+<div class="row g-3 mb-4">
+  {% set modules = [
+    ('pert.index',      'fa-project-diagram', '#3b82f6', 'PERT / CPM',        'Critical path scheduling & project duration estimation'),
+    ('location.index',  'fa-map-marker-alt',  '#8b5cf6', 'Plant Location',    'Weighted factor rating & cost comparison'),
+    ('cost.index',      'fa-dollar-sign',     '#16a34a', 'Cost Analysis',     'Fixed/variable costs, profit & breakdowns'),
+    ('transport.index', 'fa-truck',           '#d97706', 'Transportation',    'NWC, Least Cost & Vogel methods'),
+    ('break_even.index','fa-chart-line',      '#ef4444', 'Break-Even',        'BEP units, revenue & contribution margin'),
+    ('assignment.index','fa-tasks',           '#06b6d4', 'Assignment Theory', 'Hungarian method for optimal assignment'),
+    ('layout.index',    'fa-th-large',        '#84cc16', 'Plant Layout',      'REL chart & From-To movement analysis'),
+  ] %}
+  {% for route, icon, color, title, desc in modules %}
+  <div class="col-sm-6 col-lg-4">
+    <a href="{{ url_for(route) }}" class="module-card">
+      <div class="mod-icon" style="background:{{ color }}22;color:{{ color }}">
+        <i class="fas {{ icon }}"></i>
+      </div>
+      <h5>{{ title }}</h5>
+      <p>{{ desc }}</p>
+    </a>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="row g-3">
+  <!-- Recent projects -->
+  <div class="col-md-7">
+    <div class="ie-card">
+      <div class="card-header-ie">
+        <div class="card-icon" style="background:rgba(37,99,235,.15);color:#3b82f6">
+          <i class="fas fa-folder-open"></i>
+        </div>
+        <div>
+          <div class="fw-600 text-white">Recent Projects</div>
+          <div style="font-size:.75rem;color:#475569">Latest factory projects</div>
+        </div>
+        <a href="{{ url_for('main.projects') }}" class="ms-auto btn btn-sm"
+           style="background:rgba(37,99,235,.15);color:#93c5fd;border:none;font-size:.78rem">View All</a>
+      </div>
+
+      {% if projects %}
+      <table class="ie-table">
+        <thead><tr><th>Project</th><th>Company</th><th>Analyses</th><th>Date</th></tr></thead>
+        <tbody>
+        {% for p in projects %}
+        <tr>
+          <td class="fw-600" style="color:#e2e8f0">{{ p.name }}</td>
+          <td class="text-muted-ie">{{ p.company or '—' }}</td>
+          <td><span class="badge-ok">{{ p.analyses|length }}</span></td>
+          <td class="text-muted-ie" style="font-size:.78rem">{{ p.created_at.strftime('%b %d, %Y') }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="text-center py-4 text-muted-ie">
+        <i class="fas fa-folder-open fa-2x mb-2 d-block" style="opacity:.3"></i>
+        No projects yet. <a href="{{ url_for('main.projects') }}" style="color:#3b82f6">Create one</a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Module usage chart -->
+  <div class="col-md-5">
+    <div class="ie-card">
+      <div class="card-header-ie">
+        <div class="card-icon" style="background:rgba(124,58,237,.15);color:#a78bfa">
+          <i class="fas fa-chart-pie"></i>
+        </div>
+        <div><div class="fw-600 text-white">Module Usage</div></div>
+      </div>
+      <canvas id="moduleChart" height="220"></canvas>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const stats = {{ module_stats | tojson }};
+const labels = stats.map(s => s[0]);
+const counts = stats.map(s => s[1]);
+const colors = ['#3b82f6','#8b5cf6','#16a34a','#d97706','#ef4444','#06b6d4','#84cc16'];
+
+new Chart(document.getElementById('moduleChart'), {
+  type: 'doughnut',
+  data: {
+    labels,
+    datasets: [{ data: counts.length ? counts : [1],
+                 backgroundColor: colors,
+                 borderColor: '#1e293b',
+                 borderWidth: 3 }]
+  },
+  options: {
+    responsive: true,
+    plugins: {
+      legend: { position: 'bottom', labels: { color: '#94a3b8', padding: 12, font: { size: 11 } } }
+    }
+  }
+});
+</script>
+{% endblock %}

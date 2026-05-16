@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Projects{% endblock %}
+{% block page_title %}<i class="fas fa-folder-open me-2" style="color:#3b82f6"></i>Projects{% endblock %}
+
+{% block content %}
+<div class="row g-3">
+  <!-- New project form -->
+  <div class="col-md-4">
+    <div class="ie-card">
+      <div class="card-header-ie">
+        <div class="card-icon" style="background:rgba(37,99,235,.15);color:#3b82f6"><i class="fas fa-plus"></i></div>
+        <div class="fw-600 text-white">New Project</div>
+      </div>
+      <form method="POST" action="{{ url_for('main.new_project') }}">
+        <div class="mb-3">
+          <label class="form-label">Project Name *</label>
+          <input name="name" class="form-control" required placeholder="e.g. Factory Expansion 2024">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Company</label>
+          <input name="company" class="form-control" placeholder="Company name">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Industry</label>
+          <input name="industry" class="form-control" placeholder="e.g. Automotive, Food Processing">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Description</label>
+          <textarea name="description" class="form-control" rows="3" placeholder="Brief description…"></textarea>
+        </div>
+        <button type="submit" class="btn-primary-ie w-100">
+          <i class="fas fa-plus me-2"></i>Create Project
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Project list -->
+  <div class="col-md-8">
+    <div class="ie-card">
+      <div class="card-header-ie">
+        <div class="card-icon" style="background:rgba(124,58,237,.15);color:#a78bfa"><i class="fas fa-list"></i></div>
+        <div class="fw-600 text-white">All Projects ({{ projects|length }})</div>
+      </div>
+      {% if projects %}
+      <div class="row g-3">
+        {% for p in projects %}
+        <div class="col-sm-6">
+          <div class="ie-card mb-0" style="padding:1rem">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <div class="fw-600" style="color:#e2e8f0">{{ p.name }}</div>
+              <form method="POST" action="{{ url_for('main.delete_project', pid=p.id) }}"
+                    onsubmit="return confirm('Delete this project?')">
+                <button type="submit" class="btn-remove-row" style="position:static">
+                  <i class="fas fa-trash"></i>
+                </button>
+              </form>
+            </div>
+            <div class="text-muted-ie" style="font-size:.78rem">
+              {% if p.company %}<i class="fas fa-building me-1"></i>{{ p.company }}<br>{% endif %}
+              {% if p.industry %}<i class="fas fa-industry me-1"></i>{{ p.industry }}<br>{% endif %}
+              <i class="fas fa-calendar me-1"></i>{{ p.created_at.strftime('%b %d, %Y') }}
+            </div>
+            {% if p.description %}
+            <div style="font-size:.78rem;color:#64748b;margin-top:.5rem">{{ p.description[:100] }}…</div>
+            {% endif %}
+            <div class="mt-2">
+              <span class="badge-ok">{{ p.analyses|length }} analyses</span>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="text-center py-5 text-muted-ie">
+        <i class="fas fa-folder-open fa-3x mb-3 d-block" style="opacity:.2"></i>
+        No projects yet. Create your first one!
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

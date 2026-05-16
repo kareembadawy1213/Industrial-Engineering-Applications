@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block title %}Plant Location Analysis{% endblock %}
+{% block page_title %}<i class="fas fa-map-marker-alt me-2" style="color:#8b5cf6"></i>Plant Location Analysis{% endblock %}
+
+{% block content %}
+<div class="row g-3">
+  <!-- Input -->
+  <div class="col-lg-5">
+    <!-- Method 1: Weighted Factor Rating -->
+    <div class="ie-card">
+      <div class="card-header-ie">
+        <div class="card-icon" style="background:rgba(124,58,237,.15);color:#a78bfa"><i class="fas fa-balance-scale"></i></div>
+        <div><div class="fw-600 text-white">Weighted Factor Rating</div>
+          <div style="font-size:.75rem;color:#475569">Rate each location on key factors</div>
+        </div>
+      </div>
+
+      <label class="form-label">Location Names (comma separated)</label>
+      <input id="wfrLocations" class="form-control mb-3" placeholder="e.g. City A, City B, City C">
+
+      <div class="fw-600 text-white mb-2" style="font-size:.85rem">Factors</div>
+      <div id="factors-container"></div>
+      <button type="button" class="btn btn-sm mb-3"
+              style="background:rgba(124,58,237,.12);color:#a78bfa;border:1px solid rgba(124,58,237,.3);border-radius:7px"
+              onclick="addFactor()">
+        <i class="fas fa-plus me-1"></i>Add Factor
+      </button>
+    </div>
+
+    <!-- Method 2: Cost Comparison -->
+    <div class="ie-card">
+      <div class="card-header-ie">
+        <div class="card-icon" style="background:rgba(22,163,74,.15);color:#4ade80"><i class="fas fa-coins"></i></div>
+        <div><div class="fw-600 text-white">Cost Comparison</div>
+          <div style="font-size:.75rem;color:#475569">Fixed + variable cost analysis</div>
+        </div>
+      </div>
+
+      <div id="cost-locations-container"></div>
+      <button type="button" class="btn btn-sm mb-3"
+              style="background:rgba(22,163,74,.12);color:#4ade80;border:1px solid rgba(22,163,74,.3);border-radius:7px"
+              onclick="addCostLocation()">
+        <i class="fas fa-plus me-1"></i>Add Location
+      </button>
+
+      <label class="form-label">Max Production Volume (units)</label>
+      <input id="maxVolume" type="number" class="form-control mb-3" value="10000" min="1">
+    </div>
+
+    {% if projects %}
+    <div class="ie-card" style="padding:1rem">
+      <label class="form-label">Save to Project</label>
+      <select id="projectSel" class="form-select">
+        <option value="">— Don't save —</option>
+        {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+      </select>
+    </div>
+    {% endif %}
+
+    <div class="d-flex gap-2 mb-3">
+      <button class="btn-primary-ie flex-fill" onclick="runAnalysis()">
+        <i class="fas fa-search-location me-2"></i>Analyze Locations
+      </button>
+      <button class="btn btn-sm" style="background:rgba(37,99,235,.12);color:#93c5fd;border:1px solid rgba(37,99,235,.3);border-radius:8px;white-space:nowrap"
+              onclick="loadExample()">Load Example</button>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div class="col-lg-7">
+    <div id="results-area" style="display:none">
+      <!-- WFR Results -->
+      <div id="wfr-results" class="ie-card mb-3" style="display:none">
+        <div class="card-header-ie">
+          <div class="card-icon" style="background:rgba(124,58,237,.15);color:#a78bfa"><i class="fas fa-star"></i></div>
+          <div class="fw-600 text-white">Weighted Factor Rating Results</div>
+        </div>
+        <div id="wfr-ranking" class="mb-3"></div>
+        <canvas id="wfrChart" height="160"></canvas>
+      </div>
+
+      <!-- Cost Comparison Results -->
+      <div id="cc-results" class="ie-card mb-3" style="display:none">
+        <div class="card-header-ie">
+          <div class="card-icon" style="background:rgba(22,163,74,.15);color:#4ade80"><i class="fas fa-chart-area"></i></div>
+          <div class="fw-600 text-white">Cost Comparison Results</div>
+        </div>
+        <div id="cc-summary" class="mb-3"></div>
+        <canvas id="costChart" height="160"></canvas>
+      </div>
+
+      <!-- Recommendations -->
+      <div class="ie-card">
+        <div class="fw-600 text-white mb-2"><i class="fas fa-robot me-2" style="color:#fbbf24"></i>AI Recommendations</div>
+        <div id="recs-container"></div>
+      </div>
+    </div>
+
+    <div id="empty-state" class="ie-card text-center py-5">
+      <i class="fas fa-map fa-3x mb-3" style="color:#1e3a5f"></i>
+      <div class="fw-600 text-white">Enter location data and run analysis</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function factorTemplate(i) {
+  return `
+    <div class="mb-2"><label class="form-label">Factor Name</label>
+      <input class="form-control fac-name" placeholder="e.g. Labor Cost"></div>
+    <div class="row g-2">
+      <div class="col-4"><label class="form-label">Weight (%)</label><input type="number" class="form-control fac-weight" min="0" max="100" step="1" placeholder="25"></div>
+      <div class="col-8" id="fac-scores-${i}">
+        <label class="form-label">Scores (fill after entering locations)</label>
+        <input class="form-control fac-scores-raw" placeholder="e.g. City A:80, City B:65">
+      </div>
+    </div>
+    <button type="button" class="btn-remove-row" onclick="removeRow(this)"><i class="fas fa-times"></i></button>`;
+}
+
+function costLocTemplate() {
+  return `
+    <div class="row g-2">
+      <div class="col-4"><label class="form-label">Name</label><input class="form-control cl-name" placeholder="City A"></div>
+      <div class="col-4"><label class="form-label">Fixed Cost ($)</label><input type="number" class="form-control cl-fc" min="0" step="any" placeholder="50000"></div>
+      <div class="col-4"><label class="form-label">VC per Unit ($)</label><input type="number" class="form-control cl-vc" min="0" step="any" placeholder="12"></div>
+    </div>
+    <button type="button" class="btn-remove-row" onclick="removeRow(this)"><i class="fas fa-times"></i></button>`;
+}
+
+function addFactor() { addRow('factors-container', factorTemplate); }
+function addCostLocation() { addRow('cost-locations-container', costLocTemplate); }
+
+function collectWFR() {
+  const locInput = document.getElementById('wfrLocations').value.trim();
+  if (!locInput) return null;
+  const locations = locInput.split(',').map(s => s.trim()).filter(Boolean);
+  const rows = document.querySelectorAll('#factors-container .dynamic-row');
+  if (!rows.length) return null;
+  const factors = Array.from(rows).map(row => {
+    const name   = row.querySelector('.fac-name')?.value.trim();
+    const weight = parseFloat(row.querySelector('.fac-weight')?.value || 0);
+    const scoresRaw = row.querySelector('.fac-scores-raw')?.value || '';
+    const scores = {};
+    scoresRaw.split(',').forEach(pair => {
+      const [loc, val] = pair.split(':');
+      if (loc && val) scores[loc.trim()] = parseFloat(val.trim()) || 0;
+    });
+    return { name, weight, scores };
+  });
+  return { locations, weighted_factors: factors };
+}
+
+function collectCost() {
+  const rows = document.querySelectorAll('#cost-locations-container .dynamic-row');
+  if (!rows.length) return null;
+  const cost_locations = Array.from(rows).map(row => ({
+    name:                    row.querySelector('.cl-name')?.value.trim(),
+    fixed_cost:              parseFloat(row.querySelector('.cl-fc')?.value || 0),
+    variable_cost_per_unit:  parseFloat(row.querySelector('.cl-vc')?.value || 0),
+  })).filter(l => l.name);
+  const maxVol = parseInt(document.getElementById('maxVolume')?.value || 10000);
+  const step   = Math.max(1, Math.round(maxVol / 10));
+  const volumes = [];
+  for (let v = 0; v <= maxVol; v += step) volumes.push(v);
+  return { cost_locations, production_volumes: volumes };
+}
+
+async function runAnalysis() {
+  const wfr  = collectWFR();
+  const cost = collectCost();
+  if (!wfr && !cost) { alert('Please enter at least one method\'s data.'); return; }
+  const payload = {};
+  if (wfr)  Object.assign(payload, wfr);
+  if (cost) Object.assign(payload, cost);
+  payload.project_id = document.getElementById('projectSel')?.value || null;
+  showSpinner();
+  try {
+    const data = await postJSON('/location/analyze', payload);
+    renderResults(data);
+  } catch(e) { alert('Error: ' + e.message); } finally { hideSpinner(); }
+}
+
+function renderResults(d) {
+  document.getElementById('empty-state').style.display  = 'none';
+  document.getElementById('results-area').style.display = 'block';
+
+  // WFR
+  if (d.weighted_factor_rating) {
+    const wfr = d.weighted_factor_rating;
+    document.getElementById('wfr-results').style.display = 'block';
+    const ranked = wfr.ranked;
+    document.getElementById('wfr-ranking').innerHTML = ranked.map((r,i) => `
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <span style="width:24px;height:24px;border-radius:50%;background:${i===0?'rgba(22,163,74,.2)':'rgba(51,65,85,.5)'};color:${i===0?'#4ade80':'#94a3b8'};display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700">${i+1}</span>
+        <span class="fw-600" style="color:${i===0?'#4ade80':'#e2e8f0'};flex:1">${r[0]}</span>
+        <span style="color:#fbbf24;font-weight:700">${r[1].toFixed(2)}</span>
+        ${i===0?'<span class="badge-ok">Recommended</span>':''}
+      </div>`).join('');
+    const wfrOld = Chart.getChart('wfrChart'); if (wfrOld) wfrOld.destroy();
+    new Chart(document.getElementById('wfrChart'), {
+      type: 'bar',
+      data: { labels: wfr.ranked.map(r=>r[0]), datasets:[{
+        label:'Weighted Score', data: wfr.ranked.map(r=>r[1]),
+        backgroundColor: wfr.ranked.map((_,i)=>i===0?'#16a34a':'#3b82f6'), borderRadius:6 }]},
+      options: { ...CHART_DEFAULTS }
+    });
+  }
+
+  // Cost Comparison
+  if (d.cost_comparison) {
+    const cc = d.cost_comparison;
+    document.getElementById('cc-results').style.display = 'block';
+    document.getElementById('cc-summary').innerHTML = `
+      <div class="d-flex flex-wrap gap-2 mb-2">
+        <div style="background:rgba(22,163,74,.12);padding:.4rem .8rem;border-radius:8px;color:#4ade80;font-size:.82rem;font-weight:600">
+          <i class="fas fa-check-circle me-1"></i>Best: ${cc.best_location}
+        </div>
+        ${cc.crossovers.map(x=>`<div style="background:rgba(217,119,6,.12);padding:.4rem .8rem;border-radius:8px;color:#fbbf24;font-size:.78rem">Crossover @ ${x.quantity.toLocaleString()} units: ${x.between}</div>`).join('')}
+      </div>`;
+    const datasets = cc.locations.map((loc, i) => ({
+      label: loc, data: cc.chart_data[loc],
+      borderColor: ['#3b82f6','#ef4444','#16a34a','#d97706'][i % 4],
+      backgroundColor: 'transparent', borderWidth: 2, tension: .3, pointRadius: 0
+    }));
+    const ccOld = Chart.getChart('costChart'); if (ccOld) ccOld.destroy();
+    new Chart(document.getElementById('costChart'), {
+      type: 'line',
+      data: { labels: cc.volumes, datasets },
+      options: { ...CHART_DEFAULTS }
+    });
+  }
+
+  renderRecs(d.recs, 'recs-container');
+}
+
+function loadExample() {
+  document.getElementById('wfrLocations').value = 'City A, City B, City C';
+  document.getElementById('factors-container').innerHTML = '';
+  addFactor(); addFactor(); addFactor();
+  const frows = document.querySelectorAll('#factors-container .dynamic-row');
+  const exFac = [
+    {name:'Labor Cost', weight:30, scores:'City A:75, City B:85, City C:60'},
+    {name:'Infrastructure', weight:25, scores:'City A:80, City B:70, City C:90'},
+    {name:'Market Proximity', weight:45, scores:'City A:90, City B:60, City C:70'},
+  ];
+  exFac.forEach((f, i) => {
+    frows[i].querySelector('.fac-name').value       = f.name;
+    frows[i].querySelector('.fac-weight').value     = f.weight;
+    frows[i].querySelector('.fac-scores-raw').value = f.scores;
+  });
+
+  document.getElementById('cost-locations-container').innerHTML = '';
+  addCostLocation(); addCostLocation(); addCostLocation();
+  const crows = document.querySelectorAll('#cost-locations-container .dynamic-row');
+  const exCost = [
+    {name:'City A', fc:200000, vc:18},
+    {name:'City B', fc:150000, vc:22},
+    {name:'City C', fc:280000, vc:14},
+  ];
+  exCost.forEach((c, i) => {
+    crows[i].querySelector('.cl-name').value = c.name;
+    crows[i].querySelector('.cl-fc').value   = c.fc;
+    crows[i].querySelector('.cl-vc').value   = c.vc;
+  });
+}
+
+addFactor(); addFactor();
+addCostLocation(); addCostLocation();
+</script>
+{% endblock %}

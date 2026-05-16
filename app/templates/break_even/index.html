@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Break-Even Analysis{% endblock %}
+{% block page_title %}<i class="fas fa-chart-line me-2" style="color:#ef4444"></i>Break-Even Analysis{% endblock %}
+
+{% block content %}
+<div class="row g-3">
+  <div class="col-lg-4">
+    <div class="ie-card">
+      <div class="card-header-ie">
+        <div class="card-icon" style="background:rgba(239,68,68,.15);color:#f87171"><i class="fas fa-sliders-h"></i></div>
+        <div><div class="fw-600 text-white">Input Parameters</div></div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Fixed Cost ($)</label>
+        <input type="number" id="fc" class="form-control" min="0" step="any" placeholder="e.g. 50000">
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Variable Cost per Unit ($)</label>
+        <input type="number" id="vc" class="form-control" min="0" step="any" placeholder="e.g. 25">
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Selling Price per Unit ($)</label>
+        <input type="number" id="sp" class="form-control" min="0" step="any" placeholder="e.g. 45">
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Max Quantity (optional)</label>
+        <input type="number" id="maxQty" class="form-control" min="0" step="any" placeholder="Auto-calculated">
+      </div>
+
+      {% if projects %}
+      <div class="mb-3">
+        <label class="form-label">Save to Project</label>
+        <select id="projectSel" class="form-select">
+          <option value="">— Don't save —</option>
+          {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <div class="d-flex gap-2">
+        <button class="btn-primary-ie flex-fill" onclick="analyze()">
+          <i class="fas fa-chart-line me-2"></i>Calculate BEP
+        </button>
+        <button class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#f87171;border:1px solid rgba(239,68,68,.3);border-radius:8px"
+                onclick="loadExample()">Example</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div id="results-area" style="display:none">
+      <!-- Key metrics -->
+      <div class="row g-2 mb-3" id="bep-cards"></div>
+
+      <!-- Chart -->
+      <div class="chart-box mb-3">
+        <div class="fw-600 text-white mb-2">Break-Even Chart</div>
+        <canvas id="bepChart" height="200"></canvas>
+      </div>
+
+      <!-- Target profits table -->
+      <div class="ie-card mb-3">
+        <div class="fw-600 text-white mb-3"><i class="fas fa-table me-2" style="color:#ef4444"></i>Profit at Key Quantities</div>
+        <table class="ie-table">
+          <thead><tr><th>Scenario</th><th>Quantity</th><th>Revenue</th><th>Total Cost</th><th>Profit / Loss</th></tr></thead>
+          <tbody id="targets-body"></tbody>
+        </table>
+      </div>
+
+      <div class="ie-card">
+        <div class="fw-600 text-white mb-2"><i class="fas fa-robot me-2" style="color:#fbbf24"></i>AI Recommendations</div>
+        <div id="recs-container"></div>
+      </div>
+    </div>
+    <div id="empty-state" class="ie-card text-center py-5">
+      <i class="fas fa-chart-line fa-3x mb-3" style="color:#1e3a5f"></i>
+      <div class="fw-600 text-white">Enter cost parameters to calculate break-even</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function analyze() {
+  const fc = parseFloat(document.getElementById('fc').value);
+  const vc = parseFloat(document.getElementById('vc').value);
+  const sp = parseFloat(document.getElementById('sp').value);
+  if (isNaN(fc) || isNaN(vc) || isNaN(sp)) { alert('Please fill in all cost fields.'); return; }
+  const maxQty = parseFloat(document.getElementById('maxQty').value) || null;
+  showSpinner();
+  try {
+    const data = await postJSON('/break-even/analyze', {
+      fixed_cost: fc, variable_cost_per_unit: vc, selling_price: sp,
+      max_quantity: maxQty,
+      project_id: document.getElementById('projectSel')?.value || null
+    });
+    renderResults(data);
+  } catch(e) { alert('Error: ' + e.message); } finally { hideSpinner(); }
+}
+
+function renderResults(d) {
+  document.getElementById('empty-state').style.display  = 'none';
+  document.getElementById('results-area').style.display = 'block';
+
+  const bep = d.bep;
+  document.getElementById('bep-cards').innerHTML = `
+    <div class="col-6 col-md-3"><div class="stat-card"><div class="stat-icon" style="background:rgba(239,68,68,.15);color:#f87171"><i class="fas fa-equals"></i></div><div><div class="stat-value" style="font-size:1.4rem">${fmt(bep.bep_units, 0)}</div><div class="stat-label">BEP (Units)</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="stat-card"><div class="stat-icon" style="background:rgba(37,99,235,.15);color:#3b82f6"><i class="fas fa-dollar-sign"></i></div><div><div class="stat-value" style="font-size:1.4rem">$${fmt(bep.bep_revenue, 0)}</div><div class="stat-label">BEP Revenue</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="stat-card"><div class="stat-icon" style="background:rgba(22,163,74,.15);color:#4ade80"><i class="fas fa-percentage"></i></div><div><div class="stat-value" style="font-size:1.4rem">${bep.contribution_margin_ratio}%</div><div class="stat-label">CM Ratio</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="stat-card"><div class="stat-icon" style="background:rgba(217,119,6,.15);color:#fbbf24"><i class="fas fa-tags"></i></div><div><div class="stat-value" style="font-size:1.4rem">$${fmt(bep.contribution_margin)}</div><div class="stat-label">Contrib. Margin</div></div></div></div>`;
+
+  // Chart
+  const cd = d.chart_data;
+  const bepOld = Chart.getChart('bepChart'); if (bepOld) bepOld.destroy();
+  new Chart(document.getElementById('bepChart'), {
+    type: 'line',
+    data: {
+      labels: cd.quantities,
+      datasets: [
+        { label: 'Total Revenue', data: cd.revenues,    borderColor: '#16a34a', borderWidth: 2, tension: .3, pointRadius: 0 },
+        { label: 'Total Cost',    data: cd.total_costs, borderColor: '#ef4444', borderWidth: 2, tension: .3, pointRadius: 0 },
+        { label: 'Fixed Cost',    data: cd.fixed_costs, borderColor: '#475569', borderWidth: 1, borderDash: [4,4], tension: 0, pointRadius: 0 },
+      ]
+    },
+    options: {
+      ...CHART_DEFAULTS,
+      plugins: {
+        ...CHART_DEFAULTS.plugins,
+        annotation: {}
+      }
+    }
+  });
+
+  // Targets table
+  document.getElementById('targets-body').innerHTML = d.target_profits.map(t => `
+    <tr>
+      <td class="fw-600" style="color:#e2e8f0">${t.label}</td>
+      <td>${fmt(t.quantity, 0)}</td>
+      <td>$${fmt(t.revenue, 0)}</td>
+      <td>$${fmt(t.total_cost, 0)}</td>
+      <td style="color:${t.profit>=0?'#4ade80':'#f87171'};font-weight:600">
+        ${t.profit>=0?'+':''}$${fmt(t.profit, 0)}
+      </td>
+    </tr>`).join('');
+
+  renderRecs(d.recs, 'recs-container');
+}
+
+function loadExample() {
+  document.getElementById('fc').value    = 50000;
+  document.getElementById('vc').value    = 25;
+  document.getElementById('sp').value    = 45;
+  document.getElementById('maxQty').value = '';
+}
+</script>
+{% endblock %}

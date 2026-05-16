@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+{% block title %}PERT / CPM Analysis{% endblock %}
+{% block page_title %}<i class="fas fa-project-diagram me-2" style="color:#3b82f6"></i>PERT / CPM Analysis{% endblock %}
+
+{% block content %}
+<div class="row g-3">
+  <!-- Input Panel -->
+  <div class="col-lg-5">
+    <div class="ie-card">
+      <div class="card-header-ie">
+        <div class="card-icon" style="background:rgba(37,99,235,.15);color:#3b82f6"><i class="fas fa-sliders-h"></i></div>
+        <div><div class="fw-600 text-white">Project Activities</div>
+          <div style="font-size:.75rem;color:#475569">Add one row per activity</div>
+        </div>
+      </div>
+
+      <!-- CPM / PERT toggle -->
+      <div class="d-flex gap-2 mb-3">
+        <label class="form-label mb-0 mt-1">Analysis type:</label>
+        <div class="form-check form-check-inline">
+          <input class="form-check-input" type="radio" name="analysisType" id="modeCPM" value="cpm" checked>
+          <label class="form-check-label text-white" for="modeCPM">CPM</label>
+        </div>
+        <div class="form-check form-check-inline">
+          <input class="form-check-input" type="radio" name="analysisType" id="modePERT" value="pert">
+          <label class="form-check-label text-white" for="modePERT">PERT</label>
+        </div>
+      </div>
+
+      <div id="activities-container"></div>
+
+      <button type="button" class="btn btn-sm mb-3"
+              style="background:rgba(37,99,235,.12);color:#93c5fd;border:1px solid rgba(37,99,235,.3);border-radius:7px"
+              onclick="addActivity()">
+        <i class="fas fa-plus me-1"></i>Add Activity
+      </button>
+
+      <!-- Project save -->
+      {% if projects %}
+      <div class="mb-3">
+        <label class="form-label">Save to Project (optional)</label>
+        <select id="projectSel" class="form-select">
+          <option value="">— Don't save —</option>
+          {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <button class="btn-primary-ie w-100" onclick="runAnalysis()">
+        <i class="fas fa-calculator me-2"></i>Run Analysis
+      </button>
+    </div>
+
+    <!-- Example data -->
+    <div class="ie-card" style="padding:1rem">
+      <div class="fw-600 text-white mb-2" style="font-size:.85rem"><i class="fas fa-lightbulb me-1" style="color:#fbbf24"></i>Load Example Data</div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm" style="background:rgba(22,163,74,.12);color:#4ade80;border:1px solid rgba(22,163,74,.3);border-radius:7px;font-size:.78rem"
+                onclick="loadCPMExample()">CPM Example</button>
+        <button class="btn btn-sm" style="background:rgba(124,58,237,.12);color:#a78bfa;border:1px solid rgba(124,58,237,.3);border-radius:7px;font-size:.78rem"
+                onclick="loadPERTExample()">PERT Example</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results Panel -->
+  <div class="col-lg-7">
+    <div id="results-area" style="display:none">
+      <!-- Summary cards -->
+      <div class="row g-2 mb-3" id="summary-cards"></div>
+
+      <!-- Critical path -->
+      <div class="ie-card mb-3">
+        <div class="fw-600 text-white mb-2"><i class="fas fa-route me-2" style="color:#ef4444"></i>Critical Path</div>
+        <div id="critical-path-display" style="font-size:.85rem"></div>
+      </div>
+
+      <!-- Activity table -->
+      <div class="ie-card mb-3">
+        <div class="fw-600 text-white mb-3"><i class="fas fa-table me-2" style="color:#3b82f6"></i>Activity Analysis Table</div>
+        <div style="overflow-x:auto">
+          <table class="ie-table" id="pert-table">
+            <thead>
+              <tr id="table-head"></tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Gantt-style bar chart -->
+      <div class="chart-box mb-3">
+        <div class="fw-600 text-white mb-2"><i class="fas fa-chart-bar me-2" style="color:#8b5cf6"></i>Activity Duration Chart</div>
+        <canvas id="ganttChart" height="120"></canvas>
+      </div>
+
+      <!-- Recommendations -->
+      <div class="ie-card">
+        <div class="fw-600 text-white mb-2"><i class="fas fa-robot me-2" style="color:#fbbf24"></i>AI Recommendations</div>
+        <div id="recs-container"></div>
+      </div>
+    </div>
+
+    <div id="empty-state" class="ie-card text-center py-5">
+      <i class="fas fa-project-diagram fa-3x mb-3" style="color:#1e3a5f"></i>
+      <div class="fw-600 text-white">Add activities and click Run Analysis</div>
+      <div class="text-muted-ie" style="font-size:.82rem;margin-top:.4rem">
+        Results, critical path, and AI recommendations will appear here
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let actCount = 0;
+const isPERT = () => document.querySelector('input[name=analysisType]:checked').value === 'pert';
+
+function activityTemplate(i) {
+  const pert = isPERT();
+  return `
+    <div class="mb-2">
+      <label class="form-label">Activity Name</label>
+      <input class="form-control act-name" placeholder="e.g. A" value="">
+    </div>
+    <div class="mb-2">
+      <label class="form-label">Predecessors (comma separated, leave empty if none)</label>
+      <input class="form-control act-pred" placeholder="e.g. A, B">
+    </div>
+    ${pert ? `
+    <div class="row g-2">
+      <div class="col-4"><label class="form-label">Optimistic</label><input type="number" class="form-control act-opt" step="any" min="0" placeholder="a"></div>
+      <div class="col-4"><label class="form-label">Most Likely</label><input type="number" class="form-control act-ml" step="any" min="0" placeholder="m"></div>
+      <div class="col-4"><label class="form-label">Pessimistic</label><input type="number" class="form-control act-pes" step="any" min="0" placeholder="b"></div>
+    </div>` : `
+    <div class="mb-2">
+      <label class="form-label">Duration (days)</label>
+      <input type="number" class="form-control act-dur" step="any" min="0" placeholder="Duration">
+    </div>`}
+    <button type="button" class="btn-remove-row" onclick="removeRow(this)"><i class="fas fa-times"></i></button>`;
+}
+
+function addActivity() {
+  addRow('activities-container', activityTemplate);
+}
+
+function collectActivities() {
+  const rows = document.querySelectorAll('#activities-container .dynamic-row');
+  return Array.from(rows).map(row => {
+    const name  = row.querySelector('.act-name')?.value.trim();
+    const preds = row.querySelector('.act-pred')?.value.trim();
+    const act   = { name, predecessors: preds ? preds.split(',').map(p => p.trim()).filter(Boolean) : [] };
+    if (isPERT()) {
+      act.optimistic  = parseFloat(row.querySelector('.act-opt')?.value || 0);
+      act.most_likely = parseFloat(row.querySelector('.act-ml')?.value  || 0);
+      act.pessimistic = parseFloat(row.querySelector('.act-pes')?.value || 0);
+    } else {
+      act.duration = parseFloat(row.querySelector('.act-dur')?.value || 0);
+    }
+    return act;
+  }).filter(a => a.name);
+}
+
+async function runAnalysis() {
+  const acts = collectActivities();
+  if (!acts.length) { alert('Please add at least one activity.'); return; }
+  showSpinner();
+  try {
+    const data = await postJSON('/pert/analyze', {
+      activities: acts,
+      use_pert: isPERT(),
+      project_id: document.getElementById('projectSel')?.value || null
+    });
+    renderResults(data);
+  } catch(e) { alert('Error: ' + e.message); }
+  finally { hideSpinner(); }
+}
+
+function renderResults(d) {
+  document.getElementById('empty-state').style.display  = 'none';
+  document.getElementById('results-area').style.display = 'block';
+
+  // Summary cards
+  document.getElementById('summary-cards').innerHTML = `
+    <div class="col-4"><div class="stat-card"><div class="stat-icon" style="background:rgba(239,68,68,.15);color:#f87171"><i class="fas fa-clock"></i></div><div><div class="stat-value">${d.project_duration}</div><div class="stat-label">Duration (days)</div></div></div></div>
+    <div class="col-4"><div class="stat-card"><div class="stat-icon" style="background:rgba(239,68,68,.15);color:#f87171"><i class="fas fa-route"></i></div><div><div class="stat-value">${d.critical_path.length}</div><div class="stat-label">Critical Activities</div></div></div></div>
+    <div class="col-4"><div class="stat-card"><div class="stat-icon" style="background:rgba(37,99,235,.15);color:#3b82f6"><i class="fas fa-tasks"></i></div><div><div class="stat-value">${d.table.length}</div><div class="stat-label">Total Activities</div></div></div></div>`;
+
+  // Critical path
+  document.getElementById('critical-path-display').innerHTML =
+    d.critical_path.map((n,i) =>
+      `<span style="background:rgba(239,68,68,.15);color:#f87171;padding:.2rem .6rem;border-radius:6px;margin:.15rem;display:inline-block;font-weight:600">${n}</span>${i < d.critical_path.length-1 ? '<i class="fas fa-arrow-right mx-1" style="color:#475569"></i>' : ''}`
+    ).join('');
+
+  // Table headers
+  const pert = d.use_pert;
+  document.getElementById('table-head').innerHTML =
+    (pert ? '<th>Activity</th><th>a</th><th>m</th><th>b</th><th>te</th><th>σ²</th>' : '<th>Activity</th><th>Duration</th>') +
+    '<th>ES</th><th>EF</th><th>LS</th><th>LF</th><th>Slack</th><th>Critical?</th>';
+
+  document.getElementById('table-body').innerHTML = d.table.map(r => `
+    <tr class="${r.critical ? 'critical-row' : ''}">
+      <td class="fw-600 ${r.critical ? 'critical-cell' : ''}">${r.name}</td>
+      ${pert ? `<td>${r.optimistic}</td><td>${r.most_likely}</td><td>${r.pessimistic}</td><td class="fw-600">${r.duration}</td><td>${r.variance}</td>` : `<td>${r.duration}</td>`}
+      <td>${r.es}</td><td>${r.ef}</td><td>${r.ls}</td><td>${r.lf}</td>
+      <td>${r.slack}</td>
+      <td>${r.critical ? '<span class="badge-critical">CRITICAL</span>' : '<span class="badge-ok">Free</span>'}</td>
+    </tr>`).join('');
+
+  // Bar chart (ES + Duration as stacked bar)
+  const names    = d.table.map(r => r.name);
+  const esVals   = d.table.map(r => r.es);
+  const durVals  = d.table.map(r => r.duration);
+  const colors   = d.table.map(r => r.critical ? '#ef4444' : '#3b82f6');
+
+  const oldChart = Chart.getChart('ganttChart');
+  if (oldChart) oldChart.destroy();
+
+  new Chart(document.getElementById('ganttChart'), {
+    type: 'bar',
+    data: {
+      labels: names,
+      datasets: [
+        { label: 'Early Start', data: esVals, backgroundColor: 'transparent', borderColor: 'transparent' },
+        { label: 'Duration', data: durVals, backgroundColor: colors, borderRadius: 4 }
+      ]
+    },
+    options: { ...CHART_DEFAULTS, indexAxis: 'y', plugins: { ...CHART_DEFAULTS.plugins, tooltip: { ...CHART_DEFAULTS.plugins.tooltip } }, scales: { x: { stacked: true, ...CHART_DEFAULTS.scales.x }, y: { stacked: true, ...CHART_DEFAULTS.scales.y } } }
+  });
+
+  renderRecs(d.recs, 'recs-container');
+}
+
+// ── Example data loaders ────────────────────────────────────────────────────
+function clearActivities() { document.getElementById('activities-container').innerHTML = ''; }
+
+function fillActivities(acts) {
+  clearActivities();
+  acts.forEach(() => addActivity());
+  const rows = document.querySelectorAll('#activities-container .dynamic-row');
+  acts.forEach((act, i) => {
+    rows[i].querySelector('.act-name').value = act.name;
+    rows[i].querySelector('.act-pred').value = (act.predecessors || []).join(', ');
+    if (isPERT()) {
+      rows[i].querySelector('.act-opt').value = act.optimistic || '';
+      rows[i].querySelector('.act-ml').value  = act.most_likely || '';
+      rows[i].querySelector('.act-pes').value = act.pessimistic || '';
+    } else {
+      rows[i].querySelector('.act-dur').value = act.duration || '';
+    }
+  });
+}
+
+function loadCPMExample() {
+  document.getElementById('modeCPM').checked = true;
+  clearActivities();
+  const acts = [
+    {name:'A', predecessors:[], duration:3},
+    {name:'B', predecessors:[], duration:4},
+    {name:'C', predecessors:['A'], duration:2},
+    {name:'D', predecessors:['B'], duration:5},
+    {name:'E', predecessors:['C','D'], duration:3},
+    {name:'F', predecessors:['E'], duration:4},
+  ];
+  acts.forEach(() => addActivity());
+  const rows = document.querySelectorAll('#activities-container .dynamic-row');
+  acts.forEach((act, i) => {
+    rows[i].querySelector('.act-name').value = act.name;
+    rows[i].querySelector('.act-pred').value = act.predecessors.join(', ');
+    rows[i].querySelector('.act-dur').value  = act.duration;
+  });
+}
+
+function loadPERTExample() {
+  document.getElementById('modePERT').checked = true;
+  clearActivities();
+  const acts = [
+    {name:'A', predecessors:[], optimistic:1, most_likely:3, pessimistic:5},
+    {name:'B', predecessors:[], optimistic:2, most_likely:4, pessimistic:7},
+    {name:'C', predecessors:['A'], optimistic:1, most_likely:2, pessimistic:4},
+    {name:'D', predecessors:['B'], optimistic:3, most_likely:5, pessimistic:8},
+    {name:'E', predecessors:['C','D'], optimistic:2, most_likely:3, pessimistic:6},
+  ];
+  acts.forEach(() => addActivity());
+  const rows = document.querySelectorAll('#activities-container .dynamic-row');
+  acts.forEach((act, i) => {
+    rows[i].querySelector('.act-name').value = act.name;
+    rows[i].querySelector('.act-pred').value = act.predecessors.join(', ');
+    rows[i].querySelector('.act-opt').value  = act.optimistic;
+    rows[i].querySelector('.act-ml').value   = act.most_likely;
+    rows[i].querySelector('.act-pes').value  = act.pessimistic;
+  });
+}
+
+// Start with 2 empty activity rows
+addActivity(); addActivity();
+</script>
+{% endblock %}

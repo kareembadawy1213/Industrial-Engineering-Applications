@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Assignment Theory{% endblock %}
+{% block page_title %}<i class="fas fa-tasks me-2" style="color:#06b6d4"></i>Assignment Theory – Hungarian Method{% endblock %}
+
+{% block content %}
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="ie-card">
+      <div class="card-header-ie">
+        <div class="card-icon" style="background:rgba(6,182,212,.15);color:#22d3ee"><i class="fas fa-th"></i></div>
+        <div><div class="fw-600 text-white">Cost Matrix Setup</div></div>
+      </div>
+
+      <div class="row g-2 mb-3">
+        <div class="col-6">
+          <label class="form-label">Workers / Machines</label>
+          <input type="number" id="numRows" class="form-control" value="3" min="1" max="8" onchange="buildMatrix()">
+        </div>
+        <div class="col-6">
+          <label class="form-label">Tasks / Jobs</label>
+          <input type="number" id="numCols" class="form-control" value="3" min="1" max="8" onchange="buildMatrix()">
+        </div>
+      </div>
+
+      <div class="d-flex gap-2 mb-3">
+        <div class="form-check form-check-inline">
+          <input class="form-check-input" type="radio" name="optType" id="optMin" value="minimize" checked>
+          <label class="form-check-label text-white" for="optMin">Minimise Cost</label>
+        </div>
+        <div class="form-check form-check-inline">
+          <input class="form-check-input" type="radio" name="optType" id="optMax" value="maximize">
+          <label class="form-check-label text-white" for="optMax">Maximise Profit</label>
+        </div>
+      </div>
+
+      <div id="matrix-area"></div>
+
+      {% if projects %}
+      <div class="mb-3">
+        <label class="form-label">Save to Project</label>
+        <select id="projectSel" class="form-select">
+          <option value="">— Don't save —</option>
+          {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <div class="d-flex gap-2">
+        <button class="btn-primary-ie flex-fill" onclick="solve()">
+          <i class="fas fa-magic me-2"></i>Solve Assignment
+        </button>
+        <button class="btn btn-sm" style="background:rgba(6,182,212,.12);color:#22d3ee;border:1px solid rgba(6,182,212,.3);border-radius:8px"
+                onclick="loadExample()">Example</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div id="results-area" style="display:none">
+      <!-- Summary -->
+      <div class="row g-2 mb-3" id="summary-cards"></div>
+
+      <!-- Assignment matrix -->
+      <div class="ie-card mb-3">
+        <div class="fw-600 text-white mb-3"><i class="fas fa-table me-2" style="color:#06b6d4"></i>Optimal Assignment Matrix</div>
+        <div style="overflow-x:auto" id="assignment-matrix"></div>
+      </div>
+
+      <!-- Assignment list -->
+      <div class="ie-card mb-3">
+        <div class="fw-600 text-white mb-3"><i class="fas fa-list me-2" style="color:#22d3ee"></i>Optimal Assignments</div>
+        <table class="ie-table">
+          <thead><tr><th>#</th><th>Worker / Machine</th><th>Task / Job</th><th>Cost / Value</th></tr></thead>
+          <tbody id="assignments-body"></tbody>
+        </table>
+      </div>
+
+      <div class="ie-card">
+        <div class="fw-600 text-white mb-2"><i class="fas fa-robot me-2" style="color:#fbbf24"></i>AI Recommendations</div>
+        <div id="recs-container"></div>
+      </div>
+    </div>
+    <div id="empty-state" class="ie-card text-center py-5">
+      <i class="fas fa-tasks fa-3x mb-3" style="color:#1e3a5f"></i>
+      <div class="fw-600 text-white">Build the cost matrix and run solver</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function buildMatrix() {
+  const m = parseInt(document.getElementById('numRows').value);
+  const n = parseInt(document.getElementById('numCols').value);
+  let html = '';
+
+  // Row labels
+  html += '<div class="mb-2"><label class="form-label">Row Labels (workers/machines)</label><div class="row g-1 mb-1">';
+  for (let i=0;i<m;i++) html += `<div class="col"><input class="form-control row-label" style="font-size:.75rem" value="W${i+1}"></div>`;
+  html += '</div>';
+
+  // Col labels
+  html += '<label class="form-label">Column Labels (tasks/jobs)</label><div class="row g-1 mb-2">';
+  for (let j=0;j<n;j++) html += `<div class="col"><input class="form-control col-label" style="font-size:.75rem" value="T${j+1}"></div>`;
+  html += '</div>';
+
+  // Matrix values
+  html += '<label class="form-label">Cost / Profit Matrix</label>';
+  for (let i=0;i<m;i++) {
+    html += '<div class="row g-1 mb-1">';
+    for (let j=0;j<n;j++)
+      html += `<div class="col"><input type="number" class="form-control mat-cell" data-r="${i}" data-c="${j}" min="0" step="any" placeholder="${i+1}${j+1}"></div>`;
+    html += '</div>';
+  }
+  html += '</div>';
+  document.getElementById('matrix-area').innerHTML = html;
+}
+
+function collectMatrix() {
+  const m = parseInt(document.getElementById('numRows').value);
+  const n = parseInt(document.getElementById('numCols').value);
+  const mat = Array.from({length:m}, () => Array(n).fill(0));
+  document.querySelectorAll('.mat-cell').forEach(el => {
+    mat[+el.dataset.r][+el.dataset.c] = parseFloat(el.value || 0);
+  });
+  const row_labels = Array.from(document.querySelectorAll('.row-label')).map(e => e.value.trim());
+  const col_labels = Array.from(document.querySelectorAll('.col-label')).map(e => e.value.trim());
+  const minimize   = document.getElementById('optMin').checked;
+  return {cost_matrix: mat, row_labels, col_labels, minimize};
+}
+
+async function solve() {
+  showSpinner();
+  try {
+    const payload = collectMatrix();
+    payload.project_id = document.getElementById('projectSel')?.value || null;
+    const data = await postJSON('/assignment/solve', payload);
+    renderResults(data, payload.row_labels, payload.col_labels);
+  } catch(e) { alert('Error: ' + e.message); } finally { hideSpinner(); }
+}
+
+function renderResults(d, rLabels, cLabels) {
+  document.getElementById('empty-state').style.display  = 'none';
+  document.getElementById('results-area').style.display = 'block';
+
+  const label = d.minimize ? 'Total Cost' : 'Total Value';
+  document.getElementById('summary-cards').innerHTML = `
+    <div class="col-6"><div class="stat-card"><div class="stat-icon" style="background:rgba(6,182,212,.15);color:#22d3ee"><i class="fas fa-bullseye"></i></div><div><div class="stat-value">${fmt(d.total_cost)}</div><div class="stat-label">${label}</div></div></div></div>
+    <div class="col-6"><div class="stat-card"><div class="stat-icon" style="background:rgba(22,163,74,.15);color:#4ade80"><i class="fas fa-piggy-bank"></i></div><div><div class="stat-value">${fmt(d.savings_vs_sequential)}</div><div class="stat-label">Savings vs Sequential</div></div></div></div>`;
+
+  // Matrix
+  let html = '<table class="ie-table"><thead><tr><th></th>';
+  cLabels.forEach(c => html += `<th>${c}</th>`);
+  html += '</tr></thead><tbody>';
+  d.result_matrix.forEach((row, i) => {
+    html += `<tr><td class="fw-600" style="color:#94a3b8">${rLabels[i]}</td>`;
+    row.forEach(cell => {
+      html += `<td style="${cell.assigned?'background:rgba(6,182,212,.12);color:#22d3ee;font-weight:700;border:1px solid rgba(6,182,212,.3)':''}">${cell.value}${cell.assigned?'<br><span style="font-size:.65rem">★ Assigned</span>':''}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById('assignment-matrix').innerHTML = html;
+
+  // List
+  document.getElementById('assignments-body').innerHTML = d.assignments.map((a, i) => `
+    <tr>
+      <td>${i+1}</td>
+      <td class="fw-600" style="color:#22d3ee">${a.row_label}</td>
+      <td class="fw-600" style="color:#e2e8f0">${a.col_label}</td>
+      <td style="color:#4ade80;font-weight:600">${fmt(a.cost)}</td>
+    </tr>`).join('');
+
+  renderRecs(d.recs, 'recs-container');
+}
+
+function loadExample() {
+  document.getElementById('numRows').value = 4;
+  document.getElementById('numCols').value = 4;
+  buildMatrix();
+  const ex = [[9,2,7,8],[6,4,3,7],[5,8,1,8],[7,6,9,4]];
+  document.querySelectorAll('.mat-cell').forEach(el => {
+    el.value = ex[+el.dataset.r][+el.dataset.c];
+  });
+}
+
+buildMatrix();
+</script>
+{% endblock %}

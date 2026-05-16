@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}Transportation Problem{% endblock %}
+{% block page_title %}<i class="fas fa-truck me-2" style="color:#d97706"></i>Transportation Problem Solver{% endblock %}
+
+{% block content %}
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="ie-card">
+      <div class="card-header-ie">
+        <div class="card-icon" style="background:rgba(217,119,6,.15);color:#fbbf24"><i class="fas fa-table"></i></div>
+        <div><div class="fw-600 text-white">Transportation Matrix</div>
+          <div style="font-size:.75rem;color:#475569">Enter supply, demand and unit costs</div>
+        </div>
+      </div>
+
+      <div class="row g-2 mb-3">
+        <div class="col-6">
+          <label class="form-label">Number of Suppliers</label>
+          <input type="number" id="numSuppliers" class="form-control" value="3" min="1" max="8" onchange="buildMatrix()">
+        </div>
+        <div class="col-6">
+          <label class="form-label">Number of Destinations</label>
+          <input type="number" id="numDest" class="form-control" value="3" min="1" max="8" onchange="buildMatrix()">
+        </div>
+      </div>
+
+      <div id="matrix-area"></div>
+
+      {% if projects %}
+      <div class="mb-3">
+        <label class="form-label">Save to Project</label>
+        <select id="projectSel" class="form-select">
+          <option value="">— Don't save —</option>
+          {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <div class="d-flex gap-2">
+        <button class="btn-primary-ie flex-fill" onclick="solve()">
+          <i class="fas fa-route me-2"></i>Solve Transportation
+        </button>
+        <button class="btn btn-sm" style="background:rgba(217,119,6,.12);color:#fbbf24;border:1px solid rgba(217,119,6,.3);border-radius:8px"
+                onclick="loadExample()">Example</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div id="results-area" style="display:none">
+      <!-- Method comparison -->
+      <div class="ie-card mb-3">
+        <div class="fw-600 text-white mb-3"><i class="fas fa-balance-scale me-2" style="color:#d97706"></i>Method Comparison</div>
+        <div id="comparison-cards" class="row g-2 mb-3"></div>
+      </div>
+
+      <!-- Tabs for each method -->
+      <div class="ie-card mb-3">
+        <ul class="nav nav-tabs mb-3" id="methodTabs" style="border-color:#334155">
+          <li class="nav-item"><button class="nav-link active" data-method="nwc" onclick="showMethod('nwc',this)">NW Corner</button></li>
+          <li class="nav-item"><button class="nav-link" data-method="lcm" onclick="showMethod('lcm',this)">Least Cost</button></li>
+          <li class="nav-item"><button class="nav-link" data-method="vam" onclick="showMethod('vam',this)">Vogel (VAM)</button></li>
+        </ul>
+        <div id="method-content"></div>
+      </div>
+
+      <div class="ie-card">
+        <div class="fw-600 text-white mb-2"><i class="fas fa-robot me-2" style="color:#fbbf24"></i>AI Recommendations</div>
+        <div id="recs-container"></div>
+      </div>
+    </div>
+    <div id="empty-state" class="ie-card text-center py-5">
+      <i class="fas fa-truck fa-3x mb-3" style="color:#1e3a5f"></i>
+      <div class="fw-600 text-white">Configure the matrix and solve</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let lastResult = null;
+
+function buildMatrix() {
+  const m = parseInt(document.getElementById('numSuppliers').value);
+  const n = parseInt(document.getElementById('numDest').value);
+  let html = '';
+
+  // Supplier / destination name row
+  html += '<div class="mb-2"><label class="form-label">Supplier & Destination Names</label>';
+  html += '<div class="row g-1 mb-1">';
+  for (let i = 0; i < m; i++) html += `<div class="col"><input class="form-control sname" style="font-size:.75rem" placeholder="S${i+1}" value="S${i+1}"></div>`;
+  html += '</div>';
+  html += '<div class="row g-1">';
+  for (let j = 0; j < n; j++) html += `<div class="col"><input class="form-control dname" style="font-size:.75rem" placeholder="D${j+1}" value="D${j+1}"></div>`;
+  html += '</div></div>';
+
+  // Cost matrix
+  html += '<div class="mb-2"><label class="form-label">Unit Costs (Supplier × Destination)</label>';
+  for (let i = 0; i < m; i++) {
+    html += '<div class="row g-1 mb-1">';
+    for (let j = 0; j < n; j++)
+      html += `<div class="col"><input type="number" class="form-control cost-cell" data-r="${i}" data-c="${j}" min="0" step="any" placeholder="c${i+1}${j+1}"></div>`;
+    html += '</div>';
+  }
+  html += '</div>';
+
+  // Supply
+  html += '<label class="form-label">Supply (one per supplier)</label><div class="row g-1 mb-2">';
+  for (let i = 0; i < m; i++) html += `<div class="col"><input type="number" class="form-control supply-cell" min="0" step="any" placeholder="Sup${i+1}"></div>`;
+  html += '</div>';
+
+  // Demand
+  html += '<label class="form-label">Demand (one per destination)</label><div class="row g-1 mb-2">';
+  for (let j = 0; j < n; j++) html += `<div class="col"><input type="number" class="form-control demand-cell" min="0" step="any" placeholder="Dem${j+1}"></div>`;
+  html += '</div>';
+
+  document.getElementById('matrix-area').innerHTML = html;
+}
+
+function collectData() {
+  const m = parseInt(document.getElementById('numSuppliers').value);
+  const n = parseInt(document.getElementById('numDest').value);
+  const costs  = Array.from({length:m}, () => Array(n).fill(0));
+  document.querySelectorAll('.cost-cell').forEach(el => {
+    costs[+el.dataset.r][+el.dataset.c] = parseFloat(el.value || 0);
+  });
+  const supply = Array.from(document.querySelectorAll('.supply-cell')).map(e => parseFloat(e.value || 0));
+  const demand = Array.from(document.querySelectorAll('.demand-cell')).map(e => parseFloat(e.value || 0));
+  const supplier_names = Array.from(document.querySelectorAll('.sname')).map(e => e.value.trim());
+  const destination_names = Array.from(document.querySelectorAll('.dname')).map(e => e.value.trim());
+  return {costs, supply, demand, supplier_names, destination_names};
+}
+
+async function solve() {
+  showSpinner();
+  try {
+    const payload = collectData();
+    payload.project_id = document.getElementById('projectSel')?.value || null;
+    lastResult = await postJSON('/transport/solve', payload);
+    renderResults(lastResult);
+  } catch(e) { alert('Error: ' + e.message); } finally { hideSpinner(); }
+}
+
+function renderResults(d) {
+  document.getElementById('empty-state').style.display  = 'none';
+  document.getElementById('results-area').style.display = 'block';
+
+  const comp = d.comparison;
+  const best = d.best_method;
+  document.getElementById('comparison-cards').innerHTML = Object.entries(comp).map(([m, c]) => `
+    <div class="col-md-4">
+      <div class="stat-card ${m===best?'':''}">
+        <div class="stat-icon" style="background:rgba(${m===best?'22,163,74':'37,99,235'},.15);color:${m===best?'#4ade80':'#3b82f6'}">
+          <i class="fas fa-${m===best?'check-circle':'circle'}"></i>
+        </div>
+        <div>
+          <div class="stat-value" style="font-size:1.3rem">$${c.toLocaleString()}</div>
+          <div class="stat-label">${m} ${m===best?'★':''}</div>
+        </div>
+      </div>
+    </div>`).join('');
+
+  showMethod('nwc', document.querySelector('[data-method=nwc]'));
+  renderRecs(d.recs, 'recs-container');
+}
+
+function showMethod(key, btn) {
+  document.querySelectorAll('#methodTabs button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (!lastResult) return;
+  const map = { nwc: lastResult.north_west_corner, lcm: lastResult.least_cost, vam: lastResult.vogel };
+  const r   = map[key];
+  if (!r) return;
+  const sNames = lastResult.supplier_names;
+  const dNames = lastResult.destination_names;
+  const alloc  = r.allocation;
+  const costs  = r.costs;
+  const m = alloc.length, n = alloc[0]?.length || 0;
+
+  let html = `<div class="mb-2 fw-600" style="color:#4ade80">Total Cost: $${r.total_cost.toLocaleString()}</div>`;
+  html += '<div style="overflow-x:auto"><table class="ie-table"><thead><tr><th>From \\ To</th>';
+  dNames.forEach(d => html += `<th>${d}</th>`);
+  html += '<th>Supply</th></tr></thead><tbody>';
+  for (let i = 0; i < m; i++) {
+    html += `<tr><td class="fw-600">${sNames[i] || 'S'+(i+1)}</td>`;
+    for (let j = 0; j < n; j++) {
+      const a = alloc[i][j];
+      html += `<td style="${a>0?'color:#4ade80;font-weight:700':''}">${a>0?a:'—'}<br><span style="font-size:.7rem;color:#475569">${costs[i][j]}</span></td>`;
+    }
+    html += `<td class="text-muted-ie">${r.supply[i]}</td></tr>`;
+  }
+  html += '<tr><td class="fw-600 text-muted-ie">Demand</td>';
+  r.demand.forEach(d => html += `<td class="text-muted-ie">${d}</td>`);
+  html += '<td></td></tr></tbody></table></div>';
+  document.getElementById('method-content').innerHTML = html;
+}
+
+function loadExample() {
+  document.getElementById('numSuppliers').value = 3;
+  document.getElementById('numDest').value = 3;
+  buildMatrix();
+  const exCosts = [[2,3,1],[5,4,8],[5,6,8]];
+  document.querySelectorAll('.cost-cell').forEach(el => {
+    el.value = exCosts[+el.dataset.r][+el.dataset.c];
+  });
+  const sup = [120, 80, 80];
+  const dem = [150, 70, 60];
+  document.querySelectorAll('.supply-cell').forEach((el, i) => el.value = sup[i]);
+  document.querySelectorAll('.demand-cell').forEach((el, j) => el.value = dem[j]);
+}
+
+// Init
+buildMatrix();
+document.querySelectorAll('#methodTabs button').forEach(b => {
+  b.style.background = 'transparent';
+  b.style.color = '#94a3b8';
+  b.style.border = 'none';
+  b.style.borderBottom = '2px solid transparent';
+  b.style.padding = '.4rem .9rem';
+  b.style.fontSize = '.83rem';
+  b.style.cursor = 'pointer';
+});
+document.querySelector('[data-method=nwc]').style.color = '#3b82f6';
+document.querySelector('[data-method=nwc]').style.borderBottomColor = '#3b82f6';
+</script>
+{% endblock %}
